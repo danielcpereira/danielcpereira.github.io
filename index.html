@@ -308,6 +308,20 @@
   .term-inrow .pr{color:#7CFF5A;white-space:nowrap;margin-right:8px}
   .term-input{flex:1;min-width:0;background:transparent;border:0;outline:0;color:#fff;font:inherit;caret-color:#7CFF5A}
   @media(max-width:560px){.term-btn{padding:.45rem .6rem;font-size:.75rem}}
+
+  /* ===== MATRIX + SOM ===== */
+  #matrix{position:fixed;inset:0;z-index:55;pointer-events:none;opacity:0;transition:opacity .5s;background:rgba(0,10,4,.92)}
+  #matrix.on{opacity:1}
+  .fxbtn{position:fixed;z-index:29;display:flex;align-items:center;justify-content:center;gap:6px;
+    background:rgba(10,61,40,.55);border:1px solid var(--line);color:var(--pale);
+    font:600 .82rem/1 monospace;border-radius:10px;cursor:pointer;backdrop-filter:blur(6px);transition:.18s}
+  .fxbtn:hover{background:var(--card-ink);border-color:var(--accent);color:var(--accent)}
+  .fxbtn.active{background:#0a3d28;border-color:#7CFF5A;color:#7CFF5A;box-shadow:0 0 14px rgba(124,255,90,.4)}
+  #matrixBtn{top:16px;right:138px;padding:.5rem .8rem}
+  #soundBtn{top:16px;right:104px;width:34px;height:34px;font-size:1rem;padding:0}
+  @media(max-width:560px){
+    #matrixBtn{right:120px;padding:.45rem .6rem;font-size:.72rem}
+    #soundBtn{right:92px;width:30px;height:30px}}
 </style>
 </head>
 <body>
@@ -420,6 +434,11 @@
   <div class="toast" id="toast"></div>
 
   <button class="dice" id="dice" aria-label="Mudar o boneco aleatoriamente">🎲<span class="tip">Mudar boneco</span></button>
+
+  <canvas id="matrix"></canvas>
+
+  <button class="fxbtn" id="matrixBtn" aria-label="Ligar efeito Matrix">▦ matrix</button>
+  <button class="fxbtn" id="soundBtn" aria-label="Ligar/desligar som" title="Som">🔇</button>
 
   <!-- TERMINAL -->
   <button class="term-btn" id="termBtn" aria-label="Abrir terminal">›_ terminal</button>
@@ -550,6 +569,7 @@
     hacker.classList.remove('smashed');
     hacker.classList.add('in');
     screenEl.classList.add('glitch');setTimeout(function(){screenEl.classList.remove('glitch');},700);
+    try{Snd.alert();}catch(e){}
     setHud();
     clearTimeout(escapeTimer);
     escapeTimer=setTimeout(escape, 3600);
@@ -559,7 +579,7 @@
     if(!active) return;
     active=false;
     hacker.classList.remove('in');hacker.style.display='none';
-    if(!paused) showToast('A ameaça escapou…');
+    if(!paused){showToast('A ameaça escapou…');try{Snd.escapeS();}catch(e){}}
     setHud();
     if(!paused) schedule();
   }
@@ -569,6 +589,7 @@
     active=false;clearTimeout(escapeTimer);
     hacker.classList.add('smashed');
     kills++;
+    try{Snd.smash();}catch(e){}
     showToast('Ameaça neutralizada!');
     setHud();
     setTimeout(function(){hacker.classList.remove('in','smashed');hacker.style.display='none';setHud();if(!paused)schedule();},620);
@@ -670,6 +691,74 @@
 
   schedule();
 
+  /* ---------- som retro (Web Audio) ---------- */
+  var Snd=(function(){
+    var ctx=null, on=false;
+    function ac(){if(!ctx){try{ctx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}}return ctx;}
+    function blip(freq,dur,type,vol){
+      if(!on)return; var c=ac(); if(!c)return;
+      if(c.state==='suspended')c.resume();
+      var o=c.createOscillator(), g=c.createGain();
+      o.type=type||'square'; o.frequency.value=freq;
+      g.gain.value=vol||0.06;
+      o.connect(g); g.connect(c.destination);
+      var t=c.currentTime;
+      g.gain.setValueAtTime(g.gain.value,t);
+      g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+      o.start(t); o.stop(t+dur);
+    }
+    return {
+      toggle:function(){on=!on; if(on){var c=ac(); if(c&&c.state==='suspended')c.resume();} return on;},
+      isOn:function(){return on;},
+      smash:function(){blip(160,0.08,'square',0.09);setTimeout(function(){blip(90,0.14,'sawtooth',0.08);},40);},
+      escapeS:function(){blip(300,0.12,'triangle',0.05);setTimeout(function(){blip(180,0.18,'triangle',0.05);},90);},
+      alert:function(){blip(880,0.07,'square',0.04);},
+      key:function(){blip(1200+Math.random()*200,0.03,'square',0.025);},
+      enter:function(){blip(520,0.05,'square',0.05);setTimeout(function(){blip(780,0.07,'square',0.05);},55);},
+      click:function(){blip(440,0.04,'square',0.04);},
+      coin:function(){blip(988,0.07,'square',0.05);setTimeout(function(){blip(1319,0.16,'square',0.05);},70);}
+    };
+  })();
+  (function(){
+    var sb=document.getElementById('soundBtn');
+    sb.addEventListener('click',function(){
+      var on=Snd.toggle();
+      sb.textContent=on?'🔊':'🔇';
+      sb.classList.toggle('active',on);
+      if(on)Snd.coin();
+    });
+  })();
+
+  /* ---------- efeito Matrix ---------- */
+  (function(){
+    var cv=document.getElementById('matrix'), btn=document.getElementById('matrixBtn');
+    var ctx=cv.getContext('2d'), running=false, raf=null, drops=[], fontSize=16, cols=0;
+    var chars='アカサタナハマヤラワ0123456789ABCDEF<>/{}[]#$%&*+=ｱｲｳｴｵ';
+    function resize(){cv.width=innerWidth;cv.height=innerHeight;
+      cols=Math.floor(cv.width/fontSize);drops=[];
+      for(var i=0;i<cols;i++)drops[i]=Math.random()*-50;}
+    function draw(){
+      ctx.fillStyle='rgba(0,10,4,0.10)';ctx.fillRect(0,0,cv.width,cv.height);
+      ctx.font=fontSize+'px monospace';
+      for(var i=0;i<drops.length;i++){
+        var ch=chars[Math.floor(Math.random()*chars.length)];
+        var x=i*fontSize, y=drops[i]*fontSize;
+        ctx.fillStyle='#bdffd0';ctx.fillText(ch,x,y);
+        ctx.fillStyle='#3df07a';ctx.fillText(ch,x,y-fontSize);
+        if(y>cv.height&&Math.random()>0.975)drops[i]=0;
+        drops[i]++;
+      }
+      raf=requestAnimationFrame(draw);
+    }
+    function start(){if(running)return;running=true;resize();cv.classList.add('on');draw();addEventListener('resize',resize);}
+    function stop(){running=false;cv.classList.remove('on');cancelAnimationFrame(raf);removeEventListener('resize',resize);
+      setTimeout(function(){if(!running)ctx.clearRect(0,0,cv.width,cv.height);},520);}
+    btn.addEventListener('click',function(){
+      if(running){stop();btn.classList.remove('active');}
+      else{start();btn.classList.add('active');Snd.coin();}
+    });
+  })();
+
   /* ---------- terminal falso ---------- */
   (function(){
     var btn=document.getElementById('termBtn'), term=document.getElementById('terminal'),
@@ -741,9 +830,10 @@
     document.getElementById('termYellow').addEventListener('click',closeTerm);
     document.getElementById('termGreen').addEventListener('click',toggleFull);
     input.addEventListener('keydown',function(e){
-      if(e.key==='Enter'){run(input.value);input.value='';}
+      if(e.key==='Enter'){try{Snd.enter();}catch(_){}run(input.value);input.value='';}
       else if(e.key==='ArrowUp'){if(hi>0){hi--;input.value=hist[hi]||'';e.preventDefault();}}
       else if(e.key==='ArrowDown'){if(hi<hist.length){hi++;input.value=hist[hi]||'';}}
+      else if(e.key.length===1){try{Snd.key();}catch(_){}}
     });
     document.addEventListener('keydown',function(e){
       if((e.key==='`'||e.key==='~')&&!term.classList.contains('open')&&document.activeElement!==input){openTerm();e.preventDefault();}
